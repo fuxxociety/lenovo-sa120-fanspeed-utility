@@ -116,13 +116,17 @@ def main():
     if not devices:
         print('Could not find enclosure')
         sys.exit(1)
+
     for device in devices:
         if args.check:
             print_speeds(device, args.verbose)
+            print('\nDone')
+        elif args.speed:
+            set_fan_speeds(device, args.speed, args.verbose)
+            print('\nDone')
         else:
-            set_fan_speeds(device, args.speed, args.verbose)  # Pass the verbosity flag to set_fan_speeds
-    print('\nDone')
-
+            parser.print_help(sys.stderr)
+            break
 
 if __name__ == '__main__':
     main()
