@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import glob
+import argparse
 import stat
 import os.path
 
@@ -19,31 +20,15 @@ if "sg_ses_path" in os.environ:
     sg_ses_binary = os.getenv("sg_ses_path")
 
 
-def usage():
-    print('python fancontrol.py 1-7')
-    sys.exit(-1)
-
-
-def get_requested_fan_speed():
-    if len(sys.argv) < 2:
-        return usage()
-    try:
-        speed = int(sys.argv[1])
-    except ValueError:
-        return usage()
-    if not 1 <= speed <= 7:
-        return usage()
-    return speed
-
-
-def print_speeds(device):
+def print_speeds(device, verbose=False):
     for i in range(0, 6):
-        print('Fan {} speed: {}'.format(i, check_output(
-            [sg_ses_binary, '--maxlen=32768', '--index=coo,{}'.format(i), '--get=1:2:11', device])
-                                        .decode('utf-8').split('\n')[0]))
+        fan_speed = check_output(
+            [sg_ses_binary, '--maxlen=32768', '--index=coo,{}'.format(i), '--get=1:2:11', device]
+        ).decode('utf-8').split('\n')[0]
+        print('Device {}, Fan {} speed: {}'.format(device, i, fan_speed))
 
 
-def find_sa120_devices():
+def find_sa120_devices(verbose=False):
     devices = []
     seen_devices = set()
     for device_glob in devices_to_check:
@@ -63,8 +48,9 @@ def find_sa120_devices():
             try:
                 output = check_output([sg_ses_binary, '--maxlen=32768', device], stderr=STDOUT)
                 if b'ThinkServerSA120' in output:
-                    print('Enclosure found on ' + device)
                     devices.append(device)
+                    if verbose:
+                        print('Enclosure found on ' + device)
                 else:
                     print('Enclosure not found on ' + device)
             except CalledProcessError:
@@ -76,9 +62,7 @@ def format_device_id(stats):
     return '{},{}'.format(os.major(stats.st_rdev), os.minor(stats.st_rdev))
 
 
-def set_fan_speeds(device, speed):
-    print_speeds(device)
-    print('Reading current configuration...')
+def set_fan_speeds(device, speed, verbose=False):
     out = check_output(['sg_ses', '--maxlen=32768', '-p', '0x2', device, '--raw'])
 
     s = out.split()
@@ -112,23 +96,31 @@ def set_fan_speeds(device, speed):
     output.write(b'\n')
     p = Popen(['sg_ses', '--maxlen=32768', '-p', '0x2', device, '--control', '--data', '-'],
               stdout=PIPE, stdin=PIPE, stderr=PIPE)
-    print(p.communicate(input=output.getvalue())[0].decode('utf-8'))
-    print('Set fan speeds... Waiting to get fan speeds (ctrl+c to skip)')
-    try:
+    if verbose:
+        print(p.communicate(input=output.getvalue())[0].decode('utf-8'))
         time.sleep(10)
         print_speeds(device)
-    except KeyboardInterrupt:
-        pass
+    else:
+        p.communicate(input=output.getvalue())[0].decode('utf-8')
 
 
 def main():
-    speed = get_requested_fan_speed()
+    parser = argparse.ArgumentParser(description='Fan speed control for enclosure devices')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('-c', '--check', action='store_true', help='Report current fan speeds')
+    parser.add_argument('-s', '--speed', type=int, choices=range(1, 8), help='Set fan speed (1-7)')
+    parser.add_argument('-d', '--device', type=ascii, help='Only send commands to <device>')
+    args = parser.parse_args()
+
     devices = find_sa120_devices()
     if not devices:
         print('Could not find enclosure')
         sys.exit(1)
     for device in devices:
-        set_fan_speeds(device, speed)
+        if args.check:
+            print_speeds(device, args.verbose)
+        else:
+            set_fan_speeds(device, args.speed, args.verbose)  # Pass the verbosity flag to set_fan_speeds
     print('\nDone')
 
 
