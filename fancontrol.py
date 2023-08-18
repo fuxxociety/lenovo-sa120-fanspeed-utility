@@ -21,11 +21,27 @@ if "sg_ses_path" in os.environ:
 
 
 def print_speeds(device, verbose=False):
+    print('Device {}:'.format(device))
+
+    fan_speeds = []
     for i in range(0, 6):
         fan_speed = check_output(
             [sg_ses_binary, '--maxlen=32768', '--index=coo,{}'.format(i), '--get=1:2:11', device]
         ).decode('utf-8').split('\n')[0]
-        print('Device {}, Fan {} speed: {}'.format(device, i, fan_speed))
+        fan_speeds.append(int(fan_speed) if fan_speed.isdigit() else 0)
+        print('    Fan {} speed: {}'.format(i, fan_speed))
+
+    active_fan_speeds = [speed for speed in fan_speeds if speed > 0]
+    if active_fan_speeds:
+        average_speed = int(sum(active_fan_speeds) / len(active_fan_speeds))
+        fan_speed_levels = [550, 925, 1100, 1250, 1400, 1575, 1700]
+        for level, rpm in enumerate(fan_speed_levels, start=1):
+            if average_speed - 50 <= rpm <= average_speed + 50:
+                print('    Average Fan Speed: {} RPM (Level {})'.format(average_speed, level))
+                break
+        else:
+            print('    Average Fan Speed: {} RPM (Could not determine level)'.format(average_speed))
+    print('\n')
 
 
 def find_sa120_devices(verbose=False):
@@ -67,6 +83,7 @@ def set_fan_speeds(device, speed, verbose=False):
 
     s = out.split()
 
+    print('Device {}:'.format(device))
     for i in range(0, 6):
         print('Setting fan {} to {}'.format(i, speed))
         idx = 88 + 4 * i
@@ -98,15 +115,13 @@ def set_fan_speeds(device, speed, verbose=False):
               stdout=PIPE, stdin=PIPE, stderr=PIPE)
     if verbose:
         print(p.communicate(input=output.getvalue())[0].decode('utf-8'))
-        time.sleep(10)
-        print_speeds(device)
     else:
         p.communicate(input=output.getvalue())[0].decode('utf-8')
 
 
 def main():
     parser = argparse.ArgumentParser(description='Fan speed control for enclosure devices')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Increase verbosity')
     parser.add_argument('-c', '--check', action='store_true', help='Report current fan speeds')
     parser.add_argument('-s', '--speed', type=int, choices=range(1, 8), help='Set fan speed (1-7)')
     parser.add_argument('-d', '--device', type=ascii, help='Only send commands to <device>')
@@ -117,16 +132,19 @@ def main():
         print('Could not find enclosure')
         sys.exit(1)
 
-    for device in devices:
-        if args.check:
+    if args.check:
+        for device in devices:
             print_speeds(device, args.verbose)
-            print('\nDone')
-        elif args.speed:
+    elif args.speed:
+        for device in devices:
             set_fan_speeds(device, args.speed, args.verbose)
-            print('\nDone')
-        else:
-            parser.print_help(sys.stderr)
-            break
+        if args.verbose:
+            print('Waiting for fans to stabilize...')
+            time.sleep(10)
+            for device in devices:
+                print_speeds(device)
+    else:
+        parser.print_help(sys.stderr)
 
 if __name__ == '__main__':
     main()
